@@ -12,19 +12,22 @@ int intLedLightIndicator = D2; //YELLOW
 int intLedMotionIndicator = D0; //RED
 
 //Constants
-int intLightTimeout = 300;
+int intLightTimeout = 60000; //60000ms = 1min
 int intPirThreshold = 1000;
 int intLightThreshold = 1500;
 int mode_off = 0;
 int mode_on =1;
 int mode_motion = 2;
+int debugFrequency = 500;
 
 //Variables
 int intPIRReading;
 int intLightReading;
-int intTimer = intLightTimeout;
+int intTimerStarted = millis();
 int intMode = mode_motion;//current mode, defaulted to "motion"
 bool connectedOnce = false; //connected to cloud
+int intDebugCount = 0;
+int intLastDebug = 0;
 
 void setup() {
         pinMode(intPIR, INPUT);
@@ -39,13 +42,14 @@ void setup() {
 }
 
 void debug(String eventname, String message, int value) {
+  if (intDebugCount > 0){
     char msg [50];
     sprintf(msg, message.c_str(), value);
     Particle.publish(eventname, msg, 600, PRIVATE);
+  }
 }
 
 void loop() {
-   //debug("Timer","%d",intTimer);
 
    //code to register cloud functions once the particle is connected
    if (connectedOnce == false) {
@@ -53,12 +57,13 @@ void loop() {
        //Register variables and methods to allow control via Particle Cloud
        Particle.variable("sourceCode", sourceCode, STRING);
        Particle.function("setMode", setMode_cloud);
+       Particle.function("setDebugSeconds", setDebug_cloud);
        connectedOnce = true;
      }
    }
 
    intPIRReading = analogRead(intPIR);
-   //debug("PIRReading","%d",intPIRReading);
+
    if (intPIRReading > intPirThreshold){
        digitalWrite(intLedMotionIndicator,HIGH);
    }else{
@@ -66,29 +71,25 @@ void loop() {
    }
 
    intLightReading = analogRead(intLIGHT);
-   //debug("LightReading","%d",intLightReading);
     if (intLightReading > intLightThreshold){
        digitalWrite(intLedLightIndicator,HIGH);
-       //debug("Light","on",0);
    }else{
        digitalWrite(intLedLightIndicator,LOW);
-       //debug("Light","off",0);
    }
 
-
-   if (intTimer > 0){
+   if (intTimerStarted > 0){
        if (intPIRReading > intPirThreshold){
-           intTimer = intLightTimeout;
-       } else {
-           intTimer = intTimer -1;
+           intTimerStarted = millis();
        }
    } else if (intLightReading < intLightThreshold && intPIRReading > intPirThreshold) {
-     intTimer = intLightTimeout;
+     intTimerStarted = millis();
    }
 
-   debug("Timer", "%d", intTimer);
+   if (millis()-intTimerStarted > intLightTimeout){
+     intTimerStarted = 0;
+   }
 
-   if ((intMode == mode_motion && intTimer > 0) || intMode == mode_on) {
+   if ((intMode == mode_motion && intTimerStarted > 0) || intMode == mode_on) {
        digitalWrite(intLedRelayIndicator,HIGH);
        digitalWrite(intRelay, HIGH);
    } else {
@@ -96,8 +97,14 @@ void loop() {
          digitalWrite(intRelay, LOW);
    }
 
-    delay(200);
-       debug("Loop", "%d", intTimer);
+    if(intDebugCount > 0){
+      if(millis() - intLastDebug > debugFrequency){
+        intDebugCount -=1;
+        intLastDebug = millis();
+        debug("PIRReading","%d",intPIRReading);
+        debug("LightReading","%d",intLightReading);
+      }
+    }
 }
 
 
@@ -117,7 +124,17 @@ int setMode_cloud(String mode){
     return mode_off;
   }else if(mode == "on"){
     setMode(mode_on);
+    return mode_on;
   }else if(mode == "motion"){
     setMode(mode_motion);
+    return mode_motion;
   }
+}
+
+void setDebug(int seconds){
+  intDebugCount = seconds * (1000 / debugFrequency);
+}
+
+int setDebug_cloud(String seconds){
+  setDebug(seconds.toFloat());
 }
